@@ -260,7 +260,8 @@ void main()
             oGladArenaExit = GetObjectByTag("OUTLAW_WP");
 
         Raise(oPlayer);
-        GarantyJumpToObject(oPlayer, oGladArenaExit);
+        AssignCommand(oPlayer, slGetOut(oGladArenaExit));
+        //GarantyJumpToObject(oPlayer, oGladArenaExit);
         DelayCommand(1.0, MakeWeaponDropable(oPlayer));
 
         //Pseudopolymorph
