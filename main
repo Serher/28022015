@@ -1,0 +1,488 @@
+/*
+Last Modified by Tobur 21.05.2006
+*/
+#include "inc_ad_corpses"
+#include "tob_color"
+#include "tob_eye_inc"
+#include "sl_s_bg_inc"
+#include "sl_s_arcan_inc"
+#include "sl_s_ks_inc"
+#include "sl_s_ppm_inc"
+#include "sl_s_guards_inc"
+
+
+//------------------------------------------------------------------------------
+
+void ShareBonus(object oPC, string sN, int nLevel)
+{
+   //DBM("tob_death","ShareBonus","start");
+    object oOPToken = GetLocalObject(oPC, "CommandStaff");
+    int nType = GetLocalInt(oOPToken, sN+"_type");
+    if(nType)
+    {
+        int nCount = GetLocalInt(oOPToken, sN+"_count");
+        int nAmount = nType * nCount * 2 * nLevel;
+       //DBM("tob_death","ShareBonus","nAmount"+IToS(nAmount));
+        int nPRAmount = nAmount / 200 * (10/GetRank(oPC));
+       //DBM("tob_death","ShareBonus","nPRAmount"+IToS(nPRAmount));
+       //DBM("tob_death","","nAmount"+IToS(nAmount));
+
+        SetLocalInt(oPC, "giveexp", nAmount);
+        ExecuteScript("sl_s_exp_give", oPC);
+        //GiveXPToCreature(oPC, nAmount);
+        GiveGoldToCreature(oPC, nAmount * 2);
+        SetRankPoint(oPC, nPRAmount);
+    }
+}
+
+void ShareOPBonus(object oArea, int nLevel)
+{
+   //DBM("tob_death","ShareOPBonus","start");
+    int nCurrentCount = GetLocalInt(oArea, "PostCount");
+    int n;
+    string sN = IntToString(GetLocalInt(oArea, "outpost"));
+
+    object oPC;
+    for(n=1;n<=nCurrentCount;n++)
+    {
+        oPC = GetLocalObject(oArea, IntToString(n)+"_owner");
+        if(GetIsObjectValid(oPC))
+            ShareBonus(oPC, sN, nLevel);
+    }
+}
+
+void PenalDeath(object oPC)
+{
+    FadeToBlack(oPC,FADE_SPEED_FASTEST);
+    DelayCommand(5.0, FadeFromBlack(oPC,FADE_SPEED_SLOWEST));
+    ApplyEffectToObject(DURATION_TYPE_INSTANT,EffectResurrection(),oPC);
+}
+
+void Raise(object oPlayer)
+{
+        SetToStoped(oPlayer);
+        effect eVisual = EffectVisualEffect(VFX_IMP_RESTORATION);
+        effect eBad = GetFirstEffect(oPlayer);
+        ApplyEffectToObject(DURATION_TYPE_INSTANT,EffectResurrection(),oPlayer);
+        ApplyEffectToObject(DURATION_TYPE_INSTANT,EffectHeal(GetMaxHitPoints(oPlayer)), oPlayer);
+        object oCreator;
+        //Search for negative effects
+        while(GetIsEffectValid(eBad))
+        {
+            oCreator = GetEffectCreator(eBad);
+            if(GetTag(oCreator) != "sl_cr_eff_pickp")
+            {
+                RemoveEffect(oPlayer, eBad);
+                eBad = GetNextEffect(oPlayer);
+            }
+        }
+        //Fire cast spell at event for the specified target
+        //DBM("tob_death","","CHECK SPELL RESTORATION");
+        SignalEvent(oPlayer, EventSpellCastAt(oPlayer, SPELL_RESTORATION, FALSE));
+        ApplyEffectToObject(DURATION_TYPE_INSTANT, eVisual, oPlayer);
+        DeleteLocalInt(oPlayer,"Raise");//bS 4.4.12
+        slgwManageVisualEffects(oPlayer);//bS 6.4.12
+}
+
+void main()
+{
+    object oPlayer = GetLastPlayerDied();                                      //DBM("tob_death","","oPlayer"+OToS(oPlayer));
+    location lWhere = GetLocation(oPlayer);
+    object oArea = GetAreaFromLocation(lWhere);
+    if ((!GetIsObjectValid(oArea)) || (GetTag(oArea)=="porog_area"))
+    {
+        lWhere = GetTokenLocation(oPlayer);
+        oArea = GetAreaFromLocation(lWhere);
+    }
+
+    // Clear all temporary variable here
+    DeleteLocalInt(oPlayer,"SAGRA_AC");
+    DeleteLocalInt(oPlayer,"SAGRA_DIS");
+    DeleteLocalInt(oPlayer,"SAGRA_SPD");
+
+    DeleteLocalInt(oPlayer,"ADRA_CR");
+    // End clear var
+
+    // Sham Sys
+    if(GetIsInRitual(oPlayer))
+        RemoveRitualState(oPlayer);
+    ////////////////////////////////////////////////////////////////////////////
+
+    /* This part was replaced by "slSHMaxDeathClearOnEnterHS" in "sl_s_hrad_close" script //bZ 13.06.11
+    //bS 11.10.9
+    object oDoor = GetNearestObjectByTag(GetLocalString(oArea, "HS_DOOR_EXIT"), oPlayer);
+    AssignCommand(oDoor, slHSMaxDeathClear(oPlayer));
+    //Eo bS
+    */
+
+    //BG System
+    if(GetLocalInt(oArea,"BG"))
+    {                                                                           //DBM("tob_death","","BG System starts");
+        object oKiller = GetLastDamager(oPlayer);
+        if(!GetIsPC(oKiller))
+            oKiller = GetMaster(oKiller);                                       //DBM("sl_s_ondeath","","oKiller"+OToS(oKiller));
+        AssignCommand(oKiller, (ClearAllActions(TRUE)));
+        if(GetLocalInt(oArea,"BG"))
+            OnBGDeath(oKiller,oPlayer);
+        return;
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+    // OP death System
+    if(GetLocalInt(oArea, "outpost"))
+    {
+        if(slGetIsMyArea(oPlayer))
+        {
+            if(GetHitDice(oPlayer)<35)//bZ 08.12.13
+            {
+                SetEasyRess(oPlayer);
+                SetBPackNonDrop(oPlayer);
+            }
+            SetEquipNonDrop(oPlayer);
+            SetLocalInt(oPlayer, "NoXPPenalty", 1);
+        }
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+
+    object oToken = GetLocalObject(oPlayer, "TokenofPersistence");
+
+    // Hrad System
+    if(GetLocalInt(oToken,"LaserDamage"))
+        DeleteLocalInt(oToken,"LaserDamage");
+    ////////////////////////////////////////////////////////////////////////////
+
+    string sAreaTag = GetTag(GetArea(oPlayer));
+    if((sAreaTag=="PenalServituMin")|| (sAreaTag=="PenalServitude") || (sAreaTag=="PenalBarack"))
+    {
+        PenalDeath(oPlayer);
+        return;
+    }
+
+    // Regalia Part
+    object oFlag = GetItemPossessedBy(oPlayer, "regalia");
+    if(GetIsObjectValid(oFlag))
+    {
+        DestroyObject(oFlag);
+        location lLoc = GetLocation(oPlayer);
+        object oNewFlag = CreateObject(OBJECT_TYPE_ITEM, "regalia", lLoc);
+        SetLocalObject(GetModule(), "REGALIA", oNewFlag);
+        SendMessageToAllPC(CRED+"Âíèìàíèå! Ðåãàëèè áûëè çàìå÷åíû â "+GetName(GetAreaFromLocation(lLoc)));
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+    //NODEATH and House of Pain Locs
+    if (GetLocalInt(oArea,"NODEATH") || GetLocalInt(oArea,"NOPVP") || IsPlayerInHouseOfPain(oPlayer) /*bS 4.4.12*/|| GetLocalInt(oPlayer,"Raise"))
+    {
+        DelayCommand(6.0f,Raise(oPlayer));
+        //Pseudopolymorph
+        if (GetLocalInt(GetModule(), "PseudoPolyMorph"))
+        {
+            DelayCommand(10.0, ExecuteScript("sl_s_ppm_remove", oPlayer));
+        }
+
+        // bF 08.03.2012 antimulti bug when muls are killed to remove sanct
+        if(GetLocalInt(oPlayer, "Sancted"))
+        {
+            // Quick and dirty. It will not happen often
+            DelayCommand(6.1, DeleteLocalInt(oPlayer, "Sancted"));
+            DelayCommand(6.6f,BootPC(oPlayer));
+        }
+        return;
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+    //bS 4.4.12
+    // RP/PVP Chars clash
+    object oMyKiller = GetLastHostileActor(oPlayer);
+    if(!GetIsObjectValid(oMyKiller))
+        oMyKiller = GetLastDamager(oPlayer);
+        oMyKiller = GetMasterOfDamager(oMyKiller);
+   //DBM("tob_death","RP/PVP Chars clash","oMyKiller"+OToS(oMyKiller));
+   //DBM("tob_death","RP/PVP Chars clash","oPlayer"+OToS(oPlayer));
+    if(slgwGetIsInterferenceNeeded(oPlayer,oMyKiller))
+    {
+        DelayCommand(6.0f,Raise(oPlayer));
+        //Pseudopolymorph
+        if (GetLocalInt(GetModule(), "PseudoPolyMorph"))
+        {
+            DelayCommand(10.0, ExecuteScript("sl_s_ppm_remove", oPlayer));
+        }
+        SetLocalInt(oMyKiller,"Raise",1);
+        ApplyEffectToObject(DURATION_TYPE_INSTANT,EffectDamage(10000, DAMAGE_TYPE_DIVINE),oMyKiller);
+        return;
+    }
+    //Eo bS
+
+    // bF Make killer observed for guard system
+    if(CheckIfPcMarkableAsInvader(oMyKiller, oPlayer, oArea, FALSE))
+    {
+        int nTerritory = GetTerritoryByInvader(oArea, oMyKiller);
+        MarkPlayerByAttackTime(oMyKiller, nTerritory);
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Make player neutral with standart fraction & killer-NPC faction
+    object oKiller1 = GetLastHostileActor(oPlayer) ;
+    if ( (GetIsObjectValid(oKiller1)) &&
+         (!GetIsPC(oKiller1)) &&
+         (GetStandardFactionReputation(STANDARD_FACTION_HOSTILE, oKiller1) < 90) )
+    {
+        object oFacMem = GetFirstFactionMember(oKiller1, FALSE);
+        while (GetIsObjectValid(oFacMem))
+        {
+            AdjustReputation(oPlayer, oFacMem, 25);
+            if (GetAttackTarget(oFacMem)==oPlayer)
+                AssignCommand(oFacMem, ClearAllActions(TRUE));
+
+            oFacMem = GetNextFactionMember(oKiller1, FALSE);
+        }
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Player in rector quest
+    if (GetTag(oArea)=="aAtamanCamp")
+    {
+        Raise(oPlayer);
+        AssignCommand(oPlayer, JumpToObject(GetWaypointByTag("ENTERING_TRAINING_CAMP")));
+        return;
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Gladiators' Arena
+    if (GetTag(oArea)=="glad_arena")
+    {
+        object oGladArenaExit;
+        int nPCFaction = GetIdFaction(oPlayer);
+        if(nPCFaction == 1)
+            oGladArenaExit = GetObjectByTag("TEMLE_1");
+        else if(nPCFaction == 2)
+            oGladArenaExit = GetObjectByTag("OUTLAW_WP");
+
+        Raise(oPlayer);
+        GarantyJumpToObject(oPlayer, oGladArenaExit);
+        DelayCommand(1.0, MakeWeaponDropable(oPlayer));
+
+        //Pseudopolymorph
+        if (GetLocalInt(GetModule(), "PseudoPolyMorph"))
+        {
+            DelayCommand(10.0, ExecuteScript("sl_s_ppm_remove", oPlayer));
+        }
+        return;
+    }
+
+
+
+    //ACHTUNG What is the purpose of this lines?
+    // Player < 5 levels & in No-PVP location
+    if ( (GetHitDice(oPlayer) < 5) && (GetLocalInt(oArea,"NOPVP")))
+    {
+        DelayCommand(6.0f,Raise(oPlayer));
+        AssignCommand(oPlayer, ClearAllActions());
+        // ATENTION Put pale master fix with it
+        if (ApplyXPPenalty(oPlayer, GetXP(oPlayer)/20))
+            AssignCommand(oPlayer, ActionDoCommand(DoStripItems(oPlayer)));
+        // save persistence data
+        AssignCommand(oPlayer,ActionDoCommand(SavePersistenceData(oPlayer)));
+        // save character
+        //ACHTUNG Check this if it works with lokal server for example
+        AssignCommand(oPlayer,ActionDoCommand(ExecuteScript("sl_s_savechar", oPlayer)));
+        return;
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+    // PK-system
+    object oFamiliar = OBJECT_INVALID;
+    object oKiller = OBJECT_INVALID;
+    int iKillerPC = TRUE ;
+    object oMod = GetModule();
+    int iKillCount;
+    int iKilledByTrap = FALSE;
+
+    object oKiller3 = GetLastDamager(oPlayer);
+    if (GetIsObjectValid(oKiller1))
+    {
+        string sKillerName = GetDeity(oKiller1);
+        oKiller = oKiller1; //In this case oKiller1 is PC
+
+        if (GetIsPossessedFamiliar(oKiller)) // Killer - Possessed Familiar
+        {
+            oFamiliar = oKiller;
+            oKiller = GetMaster(oKiller);
+            sKillerName = GetDeity(oKiller);
+        }
+        else if (!GetIsPC(oKiller)) //In this case Killer is not PC
+        {
+            object oMasterOfAssociate = GetMaster(oKiller);
+            if (!GetIsObjectValid(oMasterOfAssociate)) oMasterOfAssociate = GetLocalObject(oKiller, "mySummoner");//bS 12.9.9
+            if (!GetIsPC(oMasterOfAssociate)) //  Killer - not summon or familiar
+                iKillerPC = FALSE ;    //  Killer - monster or NPC
+            else
+                oKiller = oMasterOfAssociate; // Killer - summon or familiar
+        }
+    }
+    else if ( (GetIsObjectValid(oKiller3)) &&
+              (GetObjectType(oKiller3) == OBJECT_TYPE_TRIGGER) )
+    {
+        oKiller = GetTrapCreator(oKiller3);
+        if (!GetIsPC(oKiller)) // Killer - not PC
+            iKillerPC = FALSE ; // Trap set not PC or PC logout game
+        else
+            iKilledByTrap = TRUE;
+    }
+
+
+
+
+    // PVP PART
+    if (iKillerPC)
+    {
+        SetLocalObject(oPlayer, "LastKiller", oKiller); //bZ 09.03.11 For NewPVP
+
+        SetVariable(GetLocalObject(oPlayer,"Eye"), oKiller, FALSE, TRUE);
+        if (GetIsPC(oKiller))   //Returns TRUE when oPlayer is killed by:
+                                //1)PC
+                                //2)Possessed Familiar
+                                //3)Summon of PC
+                                //4)a trap made by PC
+                                //5)DM
+        {
+            // OLD SYSTEM
+            if(GetLocalInt(GetModule(),"PK_SYS"))
+            {
+                if ( GetIsDM(oKiller) ) // killed by DM
+                    SendMessageToPC(oPlayer,"Òû óáèò ÄÌîì - ñòàðàéñÿ íå ãíåâèòü ñèëüíûõ ìèðà ñåãî!");
+                else
+                {
+                    // IF VISUAL ON OLD SYSTEM
+                    if(!GetLocalInt(GetModule(), "PVP_VIS"))
+                    {
+                        if ((GetIsGreen(oPlayer))||(GetIsGreen(oKiller)))
+                        {
+                            SetLocalInt(oKiller,"NoKillBonus",TRUE);
+                            SetLocalObject(oPlayer,"GreenKiller",oKiller);
+                        }
+                        SetKilledByPlayerOn(oPlayer);
+                        int iHDVictim = GetHitDice(oPlayer);
+                        if ( (iHDVictim < 4) )
+                             SendMessageToPC(oPlayer, "Òû íîâè÷åê â ýòîì ìèðå. Ñòàðàéñÿ èçáåãàòü òåõ, êòî ñòîèò âíå çàêîíà. Äà è òåõ êòî ñ çàêîíîì â ëàäó, òîæå èçáåãàé. Èáî ïîêà òâîé óðîâåíü ìåíüøå 4ãî, òåáÿ ìîæåò óáèòü áåçíàêàçàííî êàæäûé, êòî ñèëüíåå òåáÿ");
+                        object oToken = GetLocalObject(oKiller, "TokenofPersistence");
+                    }// END VISUAL PART WITH OLD PVP SYSTEM
+                    else
+                    {
+                        SetLocalInt(oPlayer,"SSA_STOP",1);                     //DBM("tob_death","Death"," OLD PK SYSTM!!!!!!");
+                        PK_System(oPlayer,oKiller);          //DBM("tob_death","Death"," END OLD PK SYSTM!!!!!!");
+                    }
+                }
+            }
+            else
+            {
+                                                                               //DBM("tob_death","Death","NEW PK SYSTEM!!!!!!");
+                //ACHTUNG Removed as long as it is old system and this is an old part 31.10.2010 Feron
+                //PK_System(oPlayer,oKiller,lWhere, oFamiliar);
+                //DBM("tob_death","Death"," NEW PK SYSTEM!!!!!!");
+
+                //06.01.11 Zoran
+                PK_System(oPlayer, oKiller);
+
+
+            }
+        }
+        string sLog = GetDeity(oKiller)+"("+IntToString(GetHitDice(oKiller))+")"+" óáèë "+GetDeity(oPlayer)+"("+IntToString(GetHitDice(oPlayer))+")";
+        SendMessageToAllDMs(sLog);
+        WriteTimestampedLogEntry(sLog);
+        object oScull = CreateItemOnObject("tob_pc_scull", oPlayer);
+        SetLocalString(oScull,"DeadMessage",GetDeadMessage(oPlayer, oKiller, oArea, oFamiliar, iKilledByTrap));
+        if(GetHitDice(oKiller))
+        {
+            SetLocalInt(oPlayer, "PK_VICTIM", 1);
+            SetLocalInt(GetLocalObject(oKiller, "TokenofPersistence"), "PK", 1);
+        }
+        object oHist = GetItemPossessedBy(oPlayer, "sl_it_history");
+        if(GetIsObjectValid(oHist)&&GetHitDice(oKiller))
+        {
+            string sIdt,sId=GetStringLeft(GetPCPlayerName(oKiller), 4)+GetStringLeft(GetDeity(oKiller), 3);
+            int i;
+            while(++i<256)
+            {
+                sIdt = sId+IntToString(i);
+                if(GetLocalString(oHist, sIdt)=="")
+                {  sId=sIdt; break; }
+            }
+            SetLocalString(oHist, "SL_HN"+GetLocalString(oHist, "SL_HL"),sId);
+                                          SetLocalString(oHist, "SL_HL" ,sId);
+            SetLocalString(oHist, "SL_HA"+sId, GetTag(GetArea(oKiller)));
+            SetLocalString(oHist, sId, "("+IntToString(GetHitDice(oPlayer))+") killed by "+((isValiostr(oKiller))?"<c¡þ>":"<cþUa>")+GetDeity(oKiller)+"</c> ("+IntToString(GetHitDice(oKiller)) );
+        }
+        oHist = GetItemPossessedBy(oKiller, "sl_it_history");
+        if(GetIsObjectValid(oHist))
+        {
+            string sIdt,sId=GetStringLeft(GetPCPlayerName(oPlayer), 4)+GetStringLeft(GetDeity(oPlayer), 3);
+            int i;
+            while(++i<256)
+            {
+                sIdt = sId+IntToString(i);
+                if(GetLocalString(oHist, sIdt)=="")
+                {  sId=sIdt; break; }
+            }
+            SetLocalString(oHist, "SL_HN"+GetLocalString(oHist, "SL_HL"),sId);
+                                          SetLocalString(oHist, "SL_HL" ,sId);
+            SetLocalString(oHist, "SL_HA"+sId, GetTag(GetArea(oKiller)));
+            SetLocalString(oHist, sId, "("+IntToString(GetHitDice(oKiller))+") killed "+((isValiostr(oPlayer))?"<c¡þ>":"<cþUa>")+GetDeity(oPlayer)+"</c> ("+IntToString(GetHitDice(oPlayer)) );
+        }
+    }
+    else
+    {
+        //OP System correction
+        object oOPGuard = oKiller;                                             //DBM("tob_death","","oOPGuard"+OToS(oOPGuard));
+        object oOwner = GetLocalObject(oOPGuard, "MyOwner");                   //DBM("tob_death","","oOwner"+OToS(oOwner));
+
+        if(GetIsObjectValid(oOwner))
+        {
+            object oOPArea = GetLocalObject(oOPGuard, "MyOP");
+           //DBM("tob_death","","oOPArea"+OToS(oOPArea));
+            ShareOPBonus(oOPArea, GetHitDice(oPlayer));
+        }
+        ////////////////////////////////////////////////////////////////////////
+
+        string sLog = GetName(oKiller)+"("+IntToString(FloatToInt(GetChallengeRating(oKiller)))+")"+" óáèë "+GetDeity(oPlayer)+"("+IntToString(GetHitDice(oPlayer))+")";
+        SendMessageToAllDMs(sLog);
+        //ACHTUNG This was disabled for this is a NPC Part and not PVP Part 31.10.2010 Feron
+        //if(!GetLocalInt(GetModule(),"PK_SYS"))
+        //    SetEquipNonDrop(oPlayer);
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+
+    // increase self death-count
+    IncreaseCountDeath(oPlayer);
+    // save persistence location
+    SetTokenLocation(oPlayer,lWhere);
+    // set persistence var on player
+    SetDeathMarkOn(oPlayer);
+    // double var
+    SetLocalInt(oPlayer, "DeathMark", TRUE);
+    // prevent save data
+    SetLocalInt(oPlayer, "NotSaveChar",TRUE); // not allow save data
+    // save persistence data
+    ExecuteScript("sl_s_savechar", oPlayer);
+    // for drop corpse in on_leave events
+    SetLocalInt(oMod,ID_PC_Key(oPlayer)+"NotEndDeath",TRUE);
+
+    // Audio & Visual
+    PlayVoiceChat(VOICE_CHAT_DEATH, oPlayer);
+    //FadeToBlack(oPlayer,FADE_SPEED_FASTEST);
+
+    //Resurrect him cuz we can't move dead players from place to place
+    ApplyEffectToObject(DURATION_TYPE_INSTANT, EffectResurrection(), oPlayer);
+    ApplyEffectToObject(DURATION_TYPE_INSTANT, EffectHeal(GetMaxHitPoints(oPlayer)), oPlayer);
+
+    // Make player invulnerable to protect him from dying again
+    SetCutsceneMode(oPlayer, TRUE);
+
+    //Horses
+    slhOnPlayerDeath();
+
+    // guaranty end effect
+    GarantyJumpToPorog(oPlayer);
+}
