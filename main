@@ -216,6 +216,26 @@ void CopyObject_(object oItem,location lLootBagLoc,object oLootBag)
     CopyObject(oItem, lLootBagLoc, oLootBag);
 }
 //------------------------------------------------------------------------------
+int GetIsDroppableItem(object oItem)
+{
+    if(GetLocalInt(oItem,"DROPIT"))
+        return TRUE;
+    if(GetItemCursedFlag(oItem))
+        return FALSE;
+    if(GetPlotFlag(oItem))
+    {
+        if(GetTag(oItem) == "sl_it_healkit")
+            return TRUE;
+
+        int nBase = GetBaseItemType(oItem);
+        if(nBase == BASE_ITEM_ARROW || nBase == BASE_ITEM_BOLT || nBase == BASE_ITEM_BULLET || nBase == BASE_ITEM_DART || nBase == BASE_ITEM_SHURIKEN || nBase == BASE_ITEM_THROWINGAXE)
+            return TRUE;
+
+        return FALSE;
+    }
+return TRUE;
+}
+//------------------------------------------------------------------------------
 //object DetachCorpse(object oPC, location lWhere)
 void DetachCorpse(object oPC, location lWhere)
 {
@@ -330,10 +350,13 @@ void DetachCorpse(object oPC, location lWhere)
             {
                 // used copy object faster?
                 // Not drop plot & cursed items
-                //Mod bS 13.10.2007
-                if( GetLocalInt(oItem,"DROPIT") ||
-                  !(GetPlotFlag(oItem) || GetItemCursedFlag(oItem)) )
+
+                //Mod bS 13.10.2007     //udp bZ 11.02.2015
+                //if( GetLocalInt(oItem,"DROPIT") ||
+                //  !(GetPlotFlag(oItem) || GetItemCursedFlag(oItem)) )
                 //Eo Mod bS
+                if(GetIsDroppableItem(oItem))
+                {
                     if (GetBaseItemType(oItem)==BASE_ITEM_LARGEBOX)
                     {
                         slWriteLostLog(oItem, "inc_ad_corpses " +"334 line");
@@ -343,8 +366,10 @@ void DetachCorpse(object oPC, location lWhere)
                     {
                         AssignCommand(oLootBag,CopyObject_(oItem, lLootBagLoc, oLootBag));
                         slWriteLostLog(oItem, "inc_ad_corpses " +"340 line");
+                        SetPlotFlag(oItem, FALSE); //bZ 11.02.2015
                         AssignCommand(oLootBag,DestroyObject(oItem));
                     }
+                }
                 oItem = GetNextItemInInventory(oPC);
             }
         }
@@ -662,21 +687,21 @@ int ResurrectPlayer(object oPC, int TypeRes, object oCleric = OBJECT_INVALID)
             //if (GetKilledByPlayer(oPC)) // óáèòûå èãðîêàìè îïûò íå òåðßþò
             //    iLostExp = 100-45;
             //else
-                iLostExp=iExp/40/nCoef;
+                iLostExp=iExp/45/nCoef;
             break;
         case TEMPLE_RESURRECTION:
             AssignCommand(oCleric,ActionCastFakeSpellAtLocation(SPELL_RESURRECTION,lResLoc));
             //if (GetKilledByPlayer(oPC)) // óáèòûå èãðîêàìè îïûò íå òåðßþò
             //    iLostExp = 100-60;
             //else
-                iLostExp=iExp/50/nCoef;
+                iLostExp=iExp/60/nCoef;
             break;
         case TEMPLE_TRUE_RES:
             AssignCommand(oCleric,ActionCastFakeSpellAtLocation(SPELL_RESURRECTION,lResLoc));
             //if (GetKilledByPlayer(oPC)) // óáèòûå èãðîêàìè îïûò íå òåðßþò
             //    iLostExp = 100-75;
             //else
-                iLostExp=iExp/60/nCoef;
+                iLostExp=iExp/75/nCoef;
             break;
         case TEMPLE_RES_WITHOUT_BODY:
             AssignCommand(oCleric,ActionCastFakeSpellAtLocation(SPELL_RAISE_DEAD,lResLoc));
